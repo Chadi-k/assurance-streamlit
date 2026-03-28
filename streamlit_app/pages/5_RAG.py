@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import pickle
 
 base_path = os.path.dirname(os.path.dirname(__file__))
 data_path = os.path.join(base_path, "data")
@@ -16,35 +17,15 @@ st.markdown("""
 Le **RAG** combine recherche d'information et génération de texte :
 1. **Détection** : identification de l'assureur et du thème dans votre question
 2. **Retrieval** : recherche des avis pertinents filtrés par assureur et thème
-3. **Generation** : un LLM génère une réponse naturelle basée sur les avis retrouvés
+3. **Generation** : un LLM génère une réponse basée sur les avis retrouvés
 """)
 
 # --- Charger données et thèmes ---
-import pickle
-
 df = pd.read_csv(os.path.join(data_path, "train_clean.csv"))
 try:
     themes = pickle.load(open(os.path.join(models_path, "themes.pkl"), "rb"))
 except:
     themes = {}
-
-# --- Charger le LLM (flan-t5-small, léger et gratuit) ---
-@st.cache_resource
-def load_llm():
-    try:
-        from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-        model_name = "google/flan-t5-small"
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-        return tokenizer, model, True
-    except Exception as e:
-        return None, None, False
-
-llm_tokenizer, llm_model, llm_available = load_llm()
-if llm_available:
-    st.success("✅ LLM chargé (google/flan-t5-small)")
-else:
-    st.warning("⚠️ LLM non disponible. pip install transformers")
 
 # --- Fonctions utilitaires ---
 def detect_assureur(question, assureurs_list):
@@ -52,23 +33,22 @@ def detect_assureur(question, assureurs_list):
     for assureur in assureurs_list:
         if assureur.lower() in q_lower:
             return assureur
-        # Gérer les variantes courantes
         variants = assureur.lower().replace("'", " ").replace("-", " ").split()
         for v in variants:
             if len(v) > 3 and v in q_lower:
                 return assureur
     return None
 
-def detect_theme(question, themes_dict):
+def detect_theme(question):
     q_lower = question.lower()
     detected = []
     theme_keywords_map = {
         "prix": ["prix", "tarif", "cher", "coût", "cotisation", "augmentation"],
-        "service_client": ["service client", "téléphone", "conseiller", "contact", "joignable", "accueil"],
-        "remboursement": ["remboursement", "rembourser", "prise en charge", "soins", "dentaire", "optique"],
-        "sinistre": ["sinistre", "accident", "dégât", "expertise", "réparation", "panne", "vol"],
+        "service_client": ["service client", "téléphone", "conseiller", "contact", "joignable"],
+        "remboursement": ["remboursement", "rembourser", "prise en charge", "soins", "dentaire"],
+        "sinistre": ["sinistre", "accident", "dégât", "expertise", "réparation", "panne"],
         "contrat": ["contrat", "résiliation", "souscription", "garantie", "couverture"],
-        "satisfaction": ["satisfait", "recommande", "qualité", "avis", "opinion", "pensent"],
+        "satisfaction": ["satisfait", "recommande", "qualité", "avis", "pensent"],
         "digital": ["site", "application", "espace client", "en ligne"]
     }
     for theme, keywords in theme_keywords_map.items():
@@ -76,26 +56,64 @@ def detect_theme(question, themes_dict):
             detected.append(theme)
     return detected if detected else ["general"]
 
-def generate_response(question, context_docs, tokenizer, model):
-    context = "\n".join(context_docs[:5])
-    prompt = f"""Based on the following customer reviews about an insurance company, answer the question in French.
+def generate_heuristic_response(question, context_docs, notes, detected_assureur, detected_themes):
+    avg_note = np.mean(notes)
+    nb_pos = sum(1 for n in notes if n >= 4)
+    nb_neg = sum(1 for n in notes if n <= 2)
+    nb_neutre = len(notes) - nb_pos - nb_neg
+    assureur_str = detected_assureur if detected_assureur else "les assureurs analysés"
+    themes_str = ", ".join(detected_themes) if detected_themes[0] != "general" else "général"
+    
+    # Extraire les mots les plus fréquents dans les avis retrouvés
+    from collections import Counter
+    all_words = " ".join([d.split("] ")[-1] if "] " in d else d for d in context_docs]).lower().split()
+    stop = {"le","la","les","de","du","des","un","une","et","en","au","à","ce","se","est","pas","plus","qui","que","je","ne","mon","ma","il","nous","très","bien","pour","dans","sur","avec"}
+    filtered = [w for w in all_words if w not in stop and len(w) > 2]
+    top_words = [w for w, c in Counter(filtered).most_common(8)]
+    
+    # Construire une réponse structurée
+    if avg_note >= 4:
+        sentiment_intro = f"Les clients sont **globalement très satisfaits** de **{assureur_str}** concernant le thème **{themes_str}**."
+    elif avg_note >= 3:
+        sentiment_intro = f"Les avis sont **mitigés** concernant **{assureur_str}** sur le thème **{themes_str}**."
+    else:
+        sentiment_intro = f"Les clients expriment une **insatisfaction notable** envers **{assureur_str}** concernant **{themes_str}**."
+    
+    # Extraire des citations courtes des avis
+    points_pos = []
+    points_neg = []
+    for doc, note in zip(context_docs, notes):
+        text = doc.split("] ")[-1] if "] " in doc else doc
+        short = text[:150].strip()
+        if note >= 4:
+            points_pos.append(short)
+        elif note <= 2:
+            points_neg.append(short)
+    
+    response = f"""{sentiment_intro}
 
-Reviews:
-{context[:1500]}
+📊 **Statistiques** : Sur {len(notes)} avis analysés, la note moyenne est de **{avg_note:.1f}/5** ({nb_pos} positifs, {nb_neutre} neutres, {nb_neg} négatifs).
 
-Question: {question}
-
-Answer in French with a detailed analysis:"""
-
-    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
-    outputs = model.generate(
-        **inputs,
-        max_length=300,
-        num_beams=4,
-        early_stopping=True,
-        no_repeat_ngram_size=3
-    )
-    return tokenizer.decode(outputs[0], skip_special_tokens=True)
+🔑 **Mots-clés récurrents** : {", ".join(top_words)}
+"""
+    
+    if points_pos:
+        response += f"""
+✅ **Points positifs relevés** :
+- _{points_pos[0][:120]}..._
+"""
+        if len(points_pos) > 1:
+            response += f"- _{points_pos[1][:120]}..._\n"
+    
+    if points_neg:
+        response += f"""
+❌ **Points négatifs relevés** :
+- _{points_neg[0][:120]}..._
+"""
+        if len(points_neg) > 1:
+            response += f"- _{points_neg[1][:120]}..._\n"
+    
+    return response
 
 # --- Interface ---
 q = st.text_input("❓ Posez votre question :",
@@ -109,36 +127,33 @@ if q and st.button("🔍 Analyser et répondre", type="primary"):
 
     assureurs_list = df["assureur"].dropna().unique().tolist()
     detected_assureur = detect_assureur(q, assureurs_list)
-    detected_themes = detect_theme(q, themes)
+    detected_themes = detect_theme(q)
 
     col1, col2 = st.columns(2)
     with col1:
         if detected_assureur:
             st.success(f"🏢 Assureur détecté : **{detected_assureur}**")
         else:
-            st.info("🏢 Aucun assureur spécifique détecté → recherche globale")
+            st.info("🏢 Aucun assureur spécifique → recherche globale")
     with col2:
-        st.info(f"🏷️ Thèmes détectés : **{', '.join(detected_themes)}**")
+        st.info(f"🏷️ Thèmes : **{', '.join(detected_themes)}**")
 
     # Étape 2 : Filtrage et Retrieval
     st.markdown("### 📚 Étape 2 : Recherche des avis pertinents")
 
-    # Filtrer par assureur si détecté
     df_filtered = df.copy()
     if detected_assureur:
         df_filtered = df_filtered[df_filtered["assureur"] == detected_assureur]
-
     if len(df_filtered) < 5:
         df_filtered = df.copy()
-        st.warning(f"Pas assez d'avis pour {detected_assureur}, recherche élargie.")
+        st.warning("Pas assez d'avis, recherche élargie.")
 
-    # TF-IDF + cosine sur le sous-ensemble filtré
     tfidf = TfidfVectorizer(max_features=10000, ngram_range=(1, 2))
     matrix = tfidf.fit_transform(df_filtered["avis"].fillna(""))
     sims = cosine_similarity(tfidf.transform([q]), matrix).flatten()
 
-    # Boost les avis qui mentionnent les thèmes détectés
-    theme_keywords_flat = {
+    # Boost thématique
+    theme_kw = {
         "prix": ["prix", "tarif", "cher"],
         "service_client": ["service", "téléphone", "conseiller"],
         "remboursement": ["remboursement", "soins", "dentaire"],
@@ -148,12 +163,10 @@ if q and st.button("🔍 Analyser et répondre", type="primary"):
         "digital": ["site", "application"],
         "general": []
     }
-
     for theme in detected_themes:
-        keywords = theme_keywords_flat.get(theme, [])
-        for kw in keywords:
+        for kw in theme_kw.get(theme, []):
             mask = df_filtered["avis"].fillna("").str.lower().str.contains(kw)
-            sims[mask.values] *= 1.3  # Boost de 30%
+            sims[mask.values] *= 1.3
 
     top_k = 7
     top_idx = sims.argsort()[-top_k:][::-1]
@@ -166,61 +179,16 @@ if q and st.button("🔍 Analyser et répondre", type="primary"):
         with st.expander(f"Doc {i+1} — {'⭐'*int(r['note'])} {r['assureur']} ({r['produit']}) — score: {sims[idx]:.3f}"):
             st.write(r["avis"])
 
-    # Stats sur les avis retrouvés
     notes = [df_filtered.iloc[idx]["note"] for idx in top_idx]
     avg_note = np.mean(notes)
-    nb_pos = sum(1 for n in notes if n >= 4)
-    nb_neg = sum(1 for n in notes if n <= 2)
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Note moyenne", f"{avg_note:.1f}/5")
-    col2.metric("Avis positifs", f"{nb_pos}/{len(notes)}")
-    col3.metric("Avis négatifs", f"{nb_neg}/{len(notes)}")
+    col2.metric("Avis positifs", f"{sum(1 for n in notes if n >= 4)}/{len(notes)}")
+    col3.metric("Avis négatifs", f"{sum(1 for n in notes if n <= 2)}/{len(notes)}")
 
-    # Étape 3 : Génération LLM
+    # Étape 3 : Génération de la réponse
     st.markdown("### 💬 Étape 3 : Réponse générée")
 
-    if llm_available:
-        with st.spinner("🤖 Génération de la réponse en cours..."):
-            response = generate_response(q, context_docs, llm_tokenizer, llm_model)
-
-        if response and len(response.strip()) > 10:
-            st.markdown(f"**🤖 Réponse du LLM :**")
-            st.markdown(f"> {response}")
-        else:
-            # Fallback : réponse heuristique
-            st.markdown("**🤖 Réponse générée (analyse automatique) :**")
-            assureur_str = detected_assureur if detected_assureur else "les assureurs"
-            sentiment = "positif ✅" if avg_note >= 3.5 else "mitigé ⚠️" if avg_note >= 2.5 else "négatif ❌"
-            st.markdown(f"> Sur la base de {len(notes)} avis analysés, le sentiment global concernant "
-                        f"**{assureur_str}** sur le thème **{', '.join(detected_themes)}** est "
-                        f"**{sentiment}** avec une note moyenne de **{avg_note:.1f}/5**. "
-                        f"{nb_pos} avis sont positifs et {nb_neg} sont négatifs.")
-    else:
-        # Sans LLM : réponse heuristique + prompt copiable
-        assureur_str = detected_assureur if detected_assureur else "les assureurs"
-        sentiment = "positif ✅" if avg_note >= 3.5 else "mitigé ⚠️" if avg_note >= 2.5 else "négatif ❌"
-        st.markdown(f"""**📊 Analyse automatique :**
-
-Sur la base de **{len(notes)} avis** analysés, le sentiment global concernant
-**{assureur_str}** sur le thème **{', '.join(detected_themes)}** est **{sentiment}**
-avec une note moyenne de **{avg_note:.1f}/5**.
-- {nb_pos} avis positifs (4-5★)
-- {nb_neg} avis négatifs (1-2★)
-""")
-
-    # Toujours afficher le prompt copiable
-    st.markdown("### 📋 Prompt pour LLM externe (ChatGPT, Claude...)")
-    prompt_text = f"""Tu es un analyste spécialisé en assurance. Voici des avis clients :
-
-{chr(10).join(context_docs[:5])}
-
-Question : {q}
-
-Réponds en français avec :
-1. Un résumé du sentiment global
-2. Les points positifs mentionnés
-3. Les points négatifs mentionnés
-4. Une recommandation"""
-    st.code(prompt_text[:2000], language="text")
-    st.caption("💡 Copiez ce prompt dans ChatGPT ou Claude pour une réponse plus détaillée")
+    response = generate_heuristic_response(q, context_docs, notes, detected_assureur, detected_themes)
+    st.markdown(response)

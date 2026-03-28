@@ -2,6 +2,3 @@ streamlit
 pandas
 numpy
 scikit-learn
-transformers
-sentencepiece
-torch --index-url https://download.pytorch.org/whl/cpu
