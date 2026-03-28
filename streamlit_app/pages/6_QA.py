@@ -1,6 +1,10 @@
+import os
 import streamlit as st
 import pandas as pd
 from collections import Counter
+
+base_path = os.path.dirname(os.path.dirname(__file__))
+data_path = os.path.join(base_path, "data")
 
 st.title("❓ Questions-Réponses sur les Avis")
 
@@ -10,7 +14,7 @@ Posez des questions sur la base de données d'avis clients. Le système répond 
 en analysant les données : classements, statistiques, recherche d'avis pertinents.
 """)
 
-df = pd.read_csv("data/train_clean.csv")
+df = pd.read_csv(os.path.join(data_path, "train_clean.csv"))
 
 questions = [
     "Quel est le meilleur assureur ?",
@@ -48,7 +52,7 @@ if q and st.button("💡 Répondre", type="primary"):
     elif "probleme" in ql or "problème" in ql:
         st.markdown("### 🔴 Mots les plus fréquents dans les avis négatifs (1-2★)")
         neg = df[df["note"] <= 2]
-        words = Counter(" ".join(neg["avis"].str.lower().dropna()).split()).most_common(20)
+        words = Counter(" ".join(neg["avis"].dropna().astype(str).str.lower()).split()).most_common(20)
         st.dataframe(pd.DataFrame(words, columns=["Mot", "Fréquence"]), use_container_width=True)
     elif "produit" in ql:
         st.markdown("### 📦 Notes moyennes par produit")
@@ -58,7 +62,7 @@ if q and st.button("💡 Répondre", type="primary"):
             use_container_width=True
         )
     elif "remboursement" in ql:
-        rembours = df[df["avis"].str.contains("rembours", case=False, na=False)]
+        rembours = df[df["avis"].astype(str).str.contains("rembours", case=False, na=False)]
         st.markdown(f"### 💰 {len(rembours)} avis mentionnent le remboursement")
         st.metric("Note moyenne", f"{rembours['note'].mean():.2f}/5")
     else:

@@ -1,6 +1,10 @@
+import os
 import streamlit as st
 import pandas as pd
 from collections import Counter
+
+base_path = os.path.dirname(os.path.dirname(__file__))
+data_path = os.path.join(base_path, "data")
 
 st.title("📝 Analyse par Assureur")
 
@@ -12,8 +16,8 @@ Sélectionnez un assureur pour voir :
 - Les **mots les plus fréquents** dans les avis
 """)
 
-df = pd.read_csv("data/train_clean.csv")
-assureur = st.selectbox("🏢 Choisissez un assureur :", sorted(df["assureur"].unique()))
+df = pd.read_csv(os.path.join(data_path, "train_clean.csv"))
+assureur = st.selectbox("🏢 Choisissez un assureur :", sorted(df["assureur"].dropna().unique()))
 s = df[df["assureur"] == assureur]
 
 st.markdown("---")
@@ -28,7 +32,7 @@ st.bar_chart(s["note"].value_counts().sort_index())
 
 if "avis_clean2" in s.columns:
     st.markdown("### 🔤 Mots les plus fréquents")
-    w = Counter(" ".join(s["avis_clean2"].dropna()).split()).most_common(20)
+    w = Counter(" ".join(s["avis_clean2"].dropna().astype(str)).split()).most_common(20)
     st.dataframe(pd.DataFrame(w, columns=["Mot", "Fréquence"]), use_container_width=True)
 
 st.markdown("### 📋 Exemples d'avis")

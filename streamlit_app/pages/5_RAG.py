@@ -1,8 +1,12 @@
+import os
 import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+
+base_path = os.path.dirname(os.path.dirname(__file__))
+data_path = os.path.join(base_path, "data")
 
 st.title("🤖 RAG — Retrieval-Augmented Generation")
 
@@ -16,7 +20,7 @@ Le **RAG** combine recherche d'information et génération de texte :
 Copiez le prompt généré dans un LLM pour obtenir une réponse naturelle.
 """)
 
-df = pd.read_csv("data/train_clean.csv")
+df = pd.read_csv(os.path.join(data_path, "train_clean.csv"))
 tfidf = TfidfVectorizer(max_features=10000)
 matrix = tfidf.fit_transform(df["avis"].fillna(""))
 
@@ -40,11 +44,6 @@ if q and st.button("🔍 Rechercher et générer", type="primary"):
     st.info(f"📊 Note moyenne des avis pertinents : **{avg:.1f}/5** — "
             f"Sentiment : {'positif ✅' if avg >= 3.5 else 'mitigé ⚠️' if avg >= 2.5 else 'négatif ❌'}")
 
-    prompt = "Contexte (avis clients):
-" + "
-".join(ctx) + f"
-
-Question: {q}
-Réponse:"
+    prompt = "Contexte (avis clients):\n" + "\n".join(ctx) + f"\n\nQuestion: {q}\nRéponse:"
     st.markdown("### 💬 Prompt à copier dans un LLM")
     st.code(prompt[:2000], language="text")

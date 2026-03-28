@@ -1,5 +1,9 @@
-import streamlit as st
+import os
 import pickle
+import streamlit as st
+
+base_path = os.path.dirname(os.path.dirname(__file__))
+models_path = os.path.join(base_path, "models")
 
 st.title("🔮 Prédiction de Note et Détection de Thèmes")
 
@@ -10,12 +14,15 @@ Entrez un avis client en français. Le modèle va :
 2. **Détecter les thèmes** abordés (prix, service client, sinistre, etc.) par recherche de mots-clés
 """)
 
-tfidf = pickle.load(open("models/tfidf_vectorizer.pkl", "rb"))
-model = pickle.load(open("models/best_model.pkl", "rb"))
-themes = pickle.load(open("models/themes.pkl", "rb"))
+tfidf = pickle.load(open(os.path.join(models_path, "tfidf_vectorizer.pkl"), "rb"))
+model = pickle.load(open(os.path.join(models_path, "best_model.pkl"), "rb"))
+themes = pickle.load(open(os.path.join(models_path, "themes.pkl"), "rb"))
 
-text = st.text_area("✏️ Entrez un avis client :", height=150,
-    placeholder="Ex: Le service client est très réactif, j'ai été remboursé rapidement...")
+text = st.text_area(
+    "✏️ Entrez un avis client :",
+    height=150,
+    placeholder="Ex: Le service client est très réactif, j'ai été remboursé rapidement..."
+)
 
 if text and st.button("🚀 Analyser", type="primary"):
     X = tfidf.transform([text.lower()])

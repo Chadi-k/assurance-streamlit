@@ -1,6 +1,10 @@
-import streamlit as st
+import os
 import pickle
 import numpy as np
+import streamlit as st
+
+base_path = os.path.dirname(os.path.dirname(__file__))
+models_path = os.path.join(base_path, "models")
 
 st.title("🔍 Explication des Prédictions")
 
@@ -12,10 +16,10 @@ Les mots sont classés par leur **contribution** à la prédiction :
 - **Mots négatifs** : poussent la note vers le bas
 """)
 
-tfidf = pickle.load(open("models/tfidf_vectorizer.pkl", "rb"))
-model = pickle.load(open("models/best_model.pkl", "rb"))
+tfidf = pickle.load(open(os.path.join(models_path, "tfidf_vectorizer.pkl"), "rb"))
+model = pickle.load(open(os.path.join(models_path, "best_model.pkl"), "rb"))
 
-text = st.text_area("✏️ Avis à analyser :", height=150)
+text = st.text_area("✏️ Entrez un avis à expliquer :", height=150)
 
 if text and st.button("🔬 Expliquer", type="primary"):
     X = tfidf.transform([text.lower()])
