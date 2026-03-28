@@ -1,11 +1,15 @@
-import streamlit as st
+import os
 import pickle
+import streamlit as st
+
+base_path = os.path.dirname(os.path.dirname(__file__))
+models_path = os.path.join(base_path, "models")
 
 st.title("🔮 Prédiction")
 
-tfidf = pickle.load(open("models/tfidf_vectorizer.pkl", "rb"))
-model = pickle.load(open("models/best_model.pkl", "rb"))
-themes = pickle.load(open("models/themes.pkl", "rb"))
+tfidf = pickle.load(open(os.path.join(models_path, "tfidf_vectorizer.pkl"), "rb"))
+model = pickle.load(open(os.path.join(models_path, "best_model.pkl"), "rb"))
+themes = pickle.load(open(os.path.join(models_path, "themes.pkl"), "rb"))
 
 text = st.text_area("Avis :", height=150)
 

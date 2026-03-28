@@ -1,10 +1,14 @@
+import os
 import streamlit as st
 import pandas as pd
 from collections import Counter
 
+base_path = os.path.dirname(os.path.dirname(__file__))
+data_path = os.path.join(base_path, "data")
+
 st.title("❓ QA")
 
-df = pd.read_csv("data/train_clean.csv")
+df = pd.read_csv(os.path.join(data_path, "train_clean.csv"))
 
 q = st.text_input("Question :")
 
