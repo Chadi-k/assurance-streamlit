@@ -4,5 +4,4 @@ numpy
 scikit-learn
 transformers
 sentencepiece
-torch
-pickle5
+torch --index-url https://download.pytorch.org/whl/cpu
